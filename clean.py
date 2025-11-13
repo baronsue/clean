@@ -41,11 +41,25 @@ MATH_COMBINED = "(" + ")|(".join(MATH_TOKENS) + ")"
 CHINESE_CHAR_PATTERN = re.compile("[\u3400-\u4DBF\u4E00-\u9FFF\uf900-\ufaff\U00020000-\U0002CEAF\U0002F800-\U0002FA1F]")
 SPACED_CAPS_PATTERN = re.compile(r"\b(?:[A-Z]\s+){2,}[A-Z]\b")
 
+# URL detection pattern
+URL_PATTERN = re.compile(
+    r'(?:http[s]?://|www\.)[^\s]+|'  # http://, https://, www.
+    r'(?:doi\.org/|doi:)[^\s]+|'  # DOI links
+    r'\b[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?'  # domain.com/path
+)
+
 
 def remove_chinese_characters(text):
     if not text:
         return text
     return CHINESE_CHAR_PATTERN.sub("", text)
+
+
+def remove_urls(text):
+    """Remove URLs from text"""
+    if not text:
+        return text
+    return URL_PATTERN.sub("", text)
 
 
 def collapse_spaced_capital_sequences(text):
@@ -70,9 +84,12 @@ def should_drop_line(line):
     if not stripped:
         return False
     lower = stripped.lower()
+    # Check for URLs
+    if URL_PATTERN.search(stripped):
+        return True
     if lower.startswith(("figure ", "figure:", "fig ", "fig.", "fig:", "table ", "table.", "table:")):
         return True
-    if re.match(r"^[\-\u2022•▪◦‣♦]+\s+", stripped):
+    if re.match(r"^[\-\u2022•▪◦‣♦]+\s+", stripped):
         return True
     if re.match(r"^\(?[a-z]\)\s+", stripped.lower()):
         return True
@@ -81,6 +98,66 @@ def should_drop_line(line):
     if re.match(r"^\d+[\.\)]\s*$", stripped):
         return True
     return False
+
+
+def clean_article_info_section(text):
+    """
+    Remove ARTICLE INFO section and keep only title before ABSTRACT.
+    This function finds ABSTRACT section and removes everything between
+    the title and ABSTRACT except the title itself.
+    """
+    if not text:
+        return text
+
+    lines = text.split('\n')
+    cleaned_lines = []
+    title_lines = []
+    found_abstract = False
+    in_article_info = False
+    title_collected = False
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        upper = stripped.upper()
+
+        # Detect ABSTRACT section
+        if 'ABSTRACT' in upper and not found_abstract:
+            found_abstract = True
+            title_collected = True
+            # Add collected title lines
+            if title_lines:
+                cleaned_lines.extend(title_lines)
+                cleaned_lines.append('')  # blank line after title
+            cleaned_lines.append(line)
+            continue
+
+        # Detect ARTICLE INFO section
+        if 'ARTICLE INFO' in upper or 'ARTICLE INFORMATION' in upper:
+            in_article_info = True
+            continue
+
+        # If we haven't found ABSTRACT yet, collect potential title lines
+        if not found_abstract and not in_article_info:
+            # Title is typically at the beginning, non-empty lines
+            if stripped and not title_collected:
+                # Avoid collecting metadata-like lines
+                if not any(keyword in stripped.lower() for keyword in
+                          ['received:', 'accepted:', 'published:', 'doi:',
+                           'keywords:', 'copyright', '©', 'elsevier',
+                           'all rights reserved', 'article history']):
+                    title_lines.append(line)
+            continue
+
+        # After finding ABSTRACT, add all lines
+        if found_abstract:
+            cleaned_lines.append(line)
+
+    # If ABSTRACT was never found, return original text with URLs removed
+    if not found_abstract:
+        return '\n'.join(remove_urls(line) for line in lines)
+
+    return '\n'.join(cleaned_lines)
+
 
 # helper: render page to png bytes
 def render_page_png(page, dpi=DPI):
@@ -130,6 +207,8 @@ with fitz.open(INPUT_PDF) as pdf:
             line = collapse_spaced_capital_sequences(line)
             if CHINESE_CHAR_PATTERN.search(line):
                 line = remove_chinese_characters(line)
+            # Remove URLs from remaining lines
+            line = remove_urls(line)
             if line.strip():
                 cleaned_lines.append(line)
         page_text = "\n".join(cleaned_lines).strip("\n")
@@ -183,9 +262,13 @@ with fitz.open(INPUT_PDF) as pdf:
                 "lines": complex_formula_lines
             })
 
+# Combine all collected segments and clean article info section
+combined_text = "\n\n".join(segment for segment in collected_segments if segment)
+final_text = clean_article_info_section(combined_text)
+
 # write collected text to output file following sample format
 with open(OUT_TXT, "w", encoding="utf-8") as out_f:
-    out_f.write("\n\n".join(segment for segment in collected_segments if segment))
+    out_f.write(final_text)
 
 # final report printed to console
 print("✅ Processing complete.")
