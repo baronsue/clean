@@ -148,9 +148,11 @@ def clean_article_info_section(text):
                         title_lines.append(line)
             continue
 
-        # After finding ABSTRACT, add all lines
+        # After finding ABSTRACT, add all lines (with URLs removed)
         if found_abstract:
-            cleaned_lines.append(line)
+            # Remove URLs from the line before adding
+            cleaned_line = remove_urls(line)
+            cleaned_lines.append(cleaned_line)
 
     # If ABSTRACT was never found, return original text with URLs removed
     if not found_abstract:
