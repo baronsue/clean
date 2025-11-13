@@ -1,2 +1,11 @@
 /Car-use--mobility-and-transport-satisfaction-of-old_2025_Research-in-Transpo.pdf
 /Car-use--mobility-and-transport-satisfaction-of-old_2025_Research-in-Transpo_pageimgs
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Test files
+test_*.py
