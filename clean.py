@@ -41,6 +41,13 @@ MATH_COMBINED = "(" + ")|(".join(MATH_TOKENS) + ")"
 CHINESE_CHAR_PATTERN = re.compile("[\u3400-\u4DBF\u4E00-\u9FFF\uf900-\ufaff\U00020000-\U0002CEAF\U0002F800-\U0002FA1F]")
 SPACED_CAPS_PATTERN = re.compile(r"\b(?:[A-Z]\s+){2,}[A-Z]\b")
 
+# URL detection pattern - more specific to avoid false positives
+URL_PATTERN = re.compile(
+    r'https?://[^\s]+|'  # http:// or https://
+    r'www\.[a-zA-Z0-9][a-zA-Z0-9-]*\.[^\s]+|'  # www.domain...
+    r'(?:doi\.org/|doi:\s*)[^\s]+'  # DOI links
+)
+
 
 def remove_chinese_characters(text):
     if not text:
@@ -81,6 +88,81 @@ def should_drop_line(line):
     if re.match(r"^\d+[\.\)]\s*$", stripped):
         return True
     return False
+
+
+def clean_article_info_section(text):
+    """
+    Remove ARTICLE INFO section and keep only title before ABSTRACT.
+    This function finds ABSTRACT section and removes everything between
+    the title and ABSTRACT except the title itself.
+    """
+    if not text:
+        return text
+
+    lines = text.split('\n')
+    cleaned_lines = []
+    title_lines = []
+    found_abstract = False
+    skip_until_abstract = False
+    collecting_title = True
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        upper = stripped.upper()
+
+        # Detect ABSTRACT section
+        if 'ABSTRACT' in upper and not found_abstract:
+            found_abstract = True
+            skip_until_abstract = False
+            collecting_title = False
+            # Add collected title lines
+            if title_lines:
+                cleaned_lines.extend(title_lines)
+                cleaned_lines.append('')  # blank line after title
+            cleaned_lines.append(line)
+            continue
+
+        # Detect ARTICLE INFO or similar metadata sections
+        if not found_abstract and any(keyword in upper for keyword in
+                                     ['ARTICLE INFO', 'ARTICLE INFORMATION',
+                                      'ARTICLE HISTORY', 'KEYWORDS']):
+            skip_until_abstract = True
+            collecting_title = False
+            continue
+
+        # If we're before ABSTRACT and should skip
+        if not found_abstract and skip_until_abstract:
+            continue
+
+        # If we haven't found ABSTRACT yet and not skipping, collect title lines
+        if not found_abstract and not skip_until_abstract and collecting_title:
+            if stripped:
+                # Avoid collecting metadata-like lines
+                if not any(keyword in stripped.lower() for keyword in
+                          ['received:', 'accepted:', 'published:', 'doi:', 'doi.org',
+                           'keywords:', 'copyright', '©', 'elsevier', 'springer',
+                           'all rights reserved', 'article history', 'available online',
+                           'e-mail:', 'email:', 'correspondence:', '@']):
+                    # Also check if line contains URLs
+                    if not URL_PATTERN.search(stripped):
+                        title_lines.append(line)
+            continue
+
+        # After finding ABSTRACT, add all lines
+        if found_abstract:
+            cleaned_lines.append(line)
+
+    # If ABSTRACT was never found, return original text with URLs removed
+    if not found_abstract:
+        result_lines = []
+        for line in lines:
+            cleaned_line = remove_urls(line)
+            if cleaned_line.strip():
+                result_lines.append(cleaned_line)
+        return '\n'.join(result_lines)
+
+    return '\n'.join(cleaned_lines)
+
 
 # helper: render page to png bytes
 def render_page_png(page, dpi=DPI):
