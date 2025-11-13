@@ -55,6 +55,13 @@ def remove_chinese_characters(text):
     return CHINESE_CHAR_PATTERN.sub("", text)
 
 
+def remove_urls(text):
+    """Remove URLs from text"""
+    if not text:
+        return text
+    return URL_PATTERN.sub("", text)
+
+
 def collapse_spaced_capital_sequences(text):
     if not text:
         return text
