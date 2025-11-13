@@ -41,11 +41,11 @@ MATH_COMBINED = "(" + ")|(".join(MATH_TOKENS) + ")"
 CHINESE_CHAR_PATTERN = re.compile("[\u3400-\u4DBF\u4E00-\u9FFF\uf900-\ufaff\U00020000-\U0002CEAF\U0002F800-\U0002FA1F]")
 SPACED_CAPS_PATTERN = re.compile(r"\b(?:[A-Z]\s+){2,}[A-Z]\b")
 
-# URL detection pattern
+# URL detection pattern - more specific to avoid false positives
 URL_PATTERN = re.compile(
-    r'(?:http[s]?://|www\.)[^\s]+|'  # http://, https://, www.
-    r'(?:doi\.org/|doi:)[^\s]+|'  # DOI links
-    r'\b[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?'  # domain.com/path
+    r'https?://[^\s]+|'  # http:// or https://
+    r'www\.[a-zA-Z0-9][a-zA-Z0-9-]*\.[^\s]+|'  # www.domain...
+    r'(?:doi\.org/|doi:\s*)[^\s]+'  # DOI links
 )
 
 
@@ -113,8 +113,8 @@ def clean_article_info_section(text):
     cleaned_lines = []
     title_lines = []
     found_abstract = False
-    in_article_info = False
-    title_collected = False
+    skip_until_abstract = False
+    collecting_title = True
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -123,7 +123,8 @@ def clean_article_info_section(text):
         # Detect ABSTRACT section
         if 'ABSTRACT' in upper and not found_abstract:
             found_abstract = True
-            title_collected = True
+            skip_until_abstract = False
+            collecting_title = False
             # Add collected title lines
             if title_lines:
                 cleaned_lines.extend(title_lines)
@@ -131,21 +132,30 @@ def clean_article_info_section(text):
             cleaned_lines.append(line)
             continue
 
-        # Detect ARTICLE INFO section
-        if 'ARTICLE INFO' in upper or 'ARTICLE INFORMATION' in upper:
-            in_article_info = True
+        # Detect ARTICLE INFO or similar metadata sections
+        if not found_abstract and any(keyword in upper for keyword in
+                                     ['ARTICLE INFO', 'ARTICLE INFORMATION',
+                                      'ARTICLE HISTORY', 'KEYWORDS']):
+            skip_until_abstract = True
+            collecting_title = False
             continue
 
-        # If we haven't found ABSTRACT yet, collect potential title lines
-        if not found_abstract and not in_article_info:
-            # Title is typically at the beginning, non-empty lines
-            if stripped and not title_collected:
+        # If we're before ABSTRACT and should skip
+        if not found_abstract and skip_until_abstract:
+            continue
+
+        # If we haven't found ABSTRACT yet and not skipping, collect title lines
+        if not found_abstract and not skip_until_abstract and collecting_title:
+            if stripped:
                 # Avoid collecting metadata-like lines
                 if not any(keyword in stripped.lower() for keyword in
-                          ['received:', 'accepted:', 'published:', 'doi:',
-                           'keywords:', 'copyright', '©', 'elsevier',
-                           'all rights reserved', 'article history']):
-                    title_lines.append(line)
+                          ['received:', 'accepted:', 'published:', 'doi:', 'doi.org',
+                           'keywords:', 'copyright', '©', 'elsevier', 'springer',
+                           'all rights reserved', 'article history', 'available online',
+                           'e-mail:', 'email:', 'correspondence:', '@']):
+                    # Also check if line contains URLs
+                    if not URL_PATTERN.search(stripped):
+                        title_lines.append(line)
             continue
 
         # After finding ABSTRACT, add all lines
@@ -154,7 +164,12 @@ def clean_article_info_section(text):
 
     # If ABSTRACT was never found, return original text with URLs removed
     if not found_abstract:
-        return '\n'.join(remove_urls(line) for line in lines)
+        result_lines = []
+        for line in lines:
+            cleaned_line = remove_urls(line)
+            if cleaned_line.strip():
+                result_lines.append(cleaned_line)
+        return '\n'.join(result_lines)
 
     return '\n'.join(cleaned_lines)
 
