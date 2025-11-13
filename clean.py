@@ -55,13 +55,6 @@ def remove_chinese_characters(text):
     return CHINESE_CHAR_PATTERN.sub("", text)
 
 
-def remove_urls(text):
-    """Remove URLs from text"""
-    if not text:
-        return text
-    return URL_PATTERN.sub("", text)
-
-
 def collapse_spaced_capital_sequences(text):
     if not text:
         return text
@@ -84,12 +77,9 @@ def should_drop_line(line):
     if not stripped:
         return False
     lower = stripped.lower()
-    # Check for URLs
-    if URL_PATTERN.search(stripped):
-        return True
     if lower.startswith(("figure ", "figure:", "fig ", "fig.", "fig:", "table ", "table.", "table:")):
         return True
-    if re.match(r"^[\-\u2022•▪◦‣♦]+\s+", stripped):
+    if re.match(r"^[\-\u2022•▪◦‣♦]+\s+", stripped):
         return True
     if re.match(r"^\(?[a-z]\)\s+", stripped.lower()):
         return True
@@ -222,8 +212,6 @@ with fitz.open(INPUT_PDF) as pdf:
             line = collapse_spaced_capital_sequences(line)
             if CHINESE_CHAR_PATTERN.search(line):
                 line = remove_chinese_characters(line)
-            # Remove URLs from remaining lines
-            line = remove_urls(line)
             if line.strip():
                 cleaned_lines.append(line)
         page_text = "\n".join(cleaned_lines).strip("\n")
@@ -277,13 +265,9 @@ with fitz.open(INPUT_PDF) as pdf:
                 "lines": complex_formula_lines
             })
 
-# Combine all collected segments and clean article info section
-combined_text = "\n\n".join(segment for segment in collected_segments if segment)
-final_text = clean_article_info_section(combined_text)
-
 # write collected text to output file following sample format
 with open(OUT_TXT, "w", encoding="utf-8") as out_f:
-    out_f.write(final_text)
+    out_f.write("\n\n".join(segment for segment in collected_segments if segment))
 
 # final report printed to console
 print("✅ Processing complete.")
